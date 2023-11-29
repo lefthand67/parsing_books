@@ -1,15 +1,18 @@
-import psycopg
-from psycopg import sql
-import info
-import requests
 import re
-from pathlib import Path
 import time
+from pathlib import Path
+
+import psycopg
+import requests
+from psycopg import sql
+
+import info
 
 
-def main() -> int:
-
-    url = 'http://www.gutenberg.org/cache/epub/19337/pg19337.txt'
+def main():
+    url = input("Enter the book url: ")
+    if url == "":
+        url = "http://www.gutenberg.org/cache/epub/19337/pg19337.txt"
 
     # check url
     if url_check(url):
@@ -43,83 +46,137 @@ def main() -> int:
     print("***")
 
     # connect to database
-    with psycopg.connect(f"""
+    with psycopg.connect(
+        f"""
             host={info.host}
+            port={info.port}
             dbname={info.dbname}
             user={info.user}
             password={info.pwd}
-                        """) as conn:
+         """
+    ) as conn:
         print("Connection with database established")
 
         # create a cursor
         with conn.cursor() as cur:
             print("  Cursor created")
 
-            query = sql.SQL("DROP TABLE IF EXISTS {};").format(
-                        sql.Identifier(book_title))
-
-#            print("\n  ", query.as_string(conn))
+            # create a table for titles
+            query = sql.SQL(
+                """
+                CREATE TABLE IF NOT EXISTS {} (
+                  id SERIAL PRIMARY KEY,
+                  book_title VARCHAR(128),
+                  year INTEGER,
+                  UNIQUE(book_title, year)
+                );
+                 """
+            ).format(sql.Identifier("title"))
             cur.execute(query)
 
-            query = sql.SQL("""CREATE TABLE IF NOT EXISTS {} (
-                                id SERIAL PRIMARY KEY,
-                                body TEXT
-                            );
-                """).format(sql.Identifier(book_title))
-
-#            print("\n  ", query.as_string(conn))
+            # create a table for names of authors
+            query = sql.SQL(
+                """
+                CREATE TABLE IF NOT EXISTS {} (
+                  id SERIAL PRIMARY KEY,
+                  name VARCHAR(128) UNIQUE
+                )
+                """
+            ).format(sql.Identifier("author"))
             cur.execute(query)
-            print(f'\n  Table "{book_title}" created')
+
+            # create a table for names of authors
+            query = sql.SQL(
+                """
+                CREATE TABLE IF NOT EXISTS {} (
+                  title_id INTEGER REFERENCES title(id) ON DELETE CASCADE,
+                  author_id INTEGER REFERENCES author(id) ON DELETE CASCADE
+                );
+                """
+            ).format(sql.Identifier("book"))
+            cur.execute(query)
+
+            # print("\n  ", query.as_string(conn))
+
+            query = sql.SQL(
+                """
+                CREATE TABLE {} (
+                  id SERIAL PRIMARY KEY,
+                  body TEXT,
+                  title_id INTEGER REFERENCES title(id) ON DELETE CASCADE
+                );
+                """
+            ).format(sql.Identifier("text"))
+
+            # print("\n  ", query.as_string(conn))
+            cur.execute(query)
+            # print(f'\n  Table "{book_title}" created')
 
             # query = sql.SQL()
 
+            # title table
+            table = "title"
+            col1 = "book_title"
+            col2 = "year"
+            query = sql.SQL("INSERT INTO {} ({}) VALUES (%s, %s);").format(
+                sql.Identifier(table),
+                sql.SQL(", ").join([sql.Identifier(col1), sql.Identifier(col2)]),
+            )
+            cur.execute(query, (book_title, book_year))
+
+            # get title_id for book table
+            select_query = sql.SQL("SELECT {} from {} WHERE {} = %s;").format(
+                sql.Identifier("id"), sql.Identifier(table), sql.Identifier(col1)
+            )
+            cur.execute(select_query, (book_title,))
+            title_id = cur.fetchone()[0]
+
+            # author table
+            table = "author"
+            col1 = "name"
+            query = sql.SQL("INSERT INTO {} ({}) VALUES (%s);").format(
+                sql.Identifier(table),
+                sql.Identifier(col1),
+            )
+            cur.execute(query, (book_author,))
+
+            # get author_id for book table
+            select_query = sql.SQL("SELECT {} from {} WHERE {} = %s;").format(
+                sql.Identifier("id"), sql.Identifier(table), sql.Identifier(col1)
+            )
+            cur.execute(select_query, (book_author,))
+            author_id = cur.fetchone()[0]
+
+            table = "book"
+            col1 = "title_id"
+            col2 = "author_id"
+            query = sql.SQL("INSERT INTO {} ({}) VALUES (%s, %s);").format(
+                sql.Identifier(table),
+                sql.SQL(", ").join([sql.Identifier(col1), sql.Identifier(col2)]),
+            )
+            cur.execute(query, (title_id, author_id))
 
             # populate the relation
-            query = sql.SQL("INSERT INTO {} (body) VALUES (%s);"
-                    ).format(sql.Identifier(book_title))
-            print(f'  Starting table "{book_title}" population')
-
-            paragraph = ''
-            chars = 0
-            count = 0
-            pcount = 0
-
-            for line in file_handler:
-                count += 1
-                line = line.strip()
-                chars += len(line)
-
-                # skip empty lines
-                if line == '' and paragraph == '':
-                    continue
-
-                # when paragraph done
-                elif line == '':
-
-                    cur.execute(query, (paragraph,))
-                    pcount += 1
-
-                    if pcount % 50 == 0:
-                        conn.commit()
-                    if pcount % 100 == 0:
-                        print(f'    {pcount} loaded...')
-                        time.sleep(1)
-
-                    paragraph = ''
-                    continue
-
-                # populating paragraph
-                paragraph += ' ' + line
+            chars, count, pcount = book_to_database(
+                fname, book_title, file_handler, conn, cur, title_id
+            )
 
             print(f'  Table "{book_title}" populated')
-            print('  Loaded {} paragraphs, {} lines, {} characters'.format(pcount, count, chars))
+            print(
+                "  Loaded {} paragraphs, {} lines, {} characters".format(
+                    pcount, count, chars
+                )
+            )
 
+        #            query = sql.SQL("""
+        #                CREATE INDEX {}
+        #                            """")
 
         print("\n  Cursor terminated")
 
     print("Connection closed")
 
-    #close file
+    # close file
     file_handler.close()
     print(f"File {fname} closed")
 
@@ -172,7 +229,7 @@ def get_txt(url: str, file_name: str) -> str:
 
     content = response.text
 
-    with open(file_name, 'w') as file:
+    with open(file_name, "w") as file:
         file.write(content)
         print(f"Text saved as {file_name}")
 
@@ -182,7 +239,7 @@ def get_txt(url: str, file_name: str) -> str:
 def get_book_title(file_handler):
     """
     Gets a title of the book from the opened file
-    Returns: str: a book's title
+    Returns: str: a title of a book
     """
 
     pattern = r"Title: (.*)$"
@@ -199,7 +256,7 @@ def get_book_title(file_handler):
 
 def get_book_author(file_handler):
     """
-    Gets a name of the book's author from the opened file
+    Gets a name of the author of the book from the opened file
     Returns: str: a book's author's name
     """
 
@@ -216,9 +273,9 @@ def get_book_author(file_handler):
 
 
 def get_book_language(file_handler):
-    """ Gets a language the book's written in from
+    """Gets a language the book is written in from
       the opened file
-    Returns: str: a book's language
+    Returns: str: a language of the book
     """
 
     pattern = r"Language: ([A-Za-z]+)"
@@ -237,7 +294,7 @@ def get_book_year(file_handler):
     """
     Gets a year the book was originally published from
       the opened file
-    Returns: str: a book's first publication year
+    Returns: str: the year the book was published
     """
 
     pattern = r"(\d{4})$"
@@ -250,6 +307,69 @@ def get_book_year(file_handler):
 
     file_handler.seek(0)
     return "-"
+
+
+def book_to_database(file_name, book_title, file_handler, connection, cursor, title_id):
+    """
+    Parses the paragraphs from the txt file,
+      creates the table with the name of the book,
+      sends the paragraphs to the database into the table
+    Returns: tuple: number of chars, of lines, of paragraphs
+    file_name: str: name of the txt file
+    book_title: str: title of the book
+    file_handler: object
+    connection: of of psycopg
+    cursor: object of psycopg
+    """
+
+    conn = connection
+    cur = cursor
+
+    print(f'  Started table "{book_title}" populating...')
+
+    paragraph = ""
+    chars = 0
+    count = 0
+    pcount = 0
+
+    # text table
+    table = "text"
+    col1 = "body"
+    col2 = "title_id"
+    query = sql.SQL("INSERT INTO {} ({}) VALUES (%s, %s);").format(
+        sql.Identifier(table),
+        sql.SQL(", ").join([sql.Identifier(col1), sql.Identifier(col2)]),
+    )
+
+    for line in file_handler:
+        count += 1
+        line = line.strip()
+        chars += len(line)
+
+        # skip empty lines
+        if line == "" and paragraph == "":
+            continue
+
+        # when paragraph done
+        elif line == "":
+            cur.execute(query, (paragraph, title_id))
+            pcount += 1
+
+            if pcount % 50 == 0:
+                conn.commit()
+            if pcount % 100 == 0:
+                print(f"    {pcount} loaded...")
+                time.sleep(1)
+
+            paragraph = ""
+            continue
+
+        # populating paragraph
+        paragraph += " " + line
+
+    conn.commit()
+
+    return chars, count, pcount
 
 
 main()
