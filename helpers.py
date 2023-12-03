@@ -1,6 +1,7 @@
 import re
 import time
 
+import psycopg
 import requests
 from psycopg import sql
 
@@ -32,7 +33,20 @@ def get_file_name(url):
 
     match = re.search(pattern, url)
 
-    return match.group(1)
+    if match:
+        return match.group(1)
+
+    return None
+
+
+def get_file_index(url):
+    pattern = r"\/(\d+)\/"
+    match = re.search(pattern, url)
+
+    if match:
+        return match.group(1)
+
+    return None
 
 
 def get_txt(url, file_name, verbose=False):
@@ -63,7 +77,7 @@ def get_string_match(pattern, file_handler):
     """
 
     for line in file_handler:
-        match = pattern.search(line)
+        match = re.search(pattern, line)
         if match:
             file_handler.seek(0)
             return match.group(1)
@@ -105,17 +119,7 @@ def insert_into_table(cursor, table, columns, values):
     values: list or tuple of strings: list of the corresponding
       to attributes values
     """
-    # if the column is one
-    if len(columns) == 1 and len(values) == 1:
-        query = sql.SQL(
-            """
-            INSERT INTO {} ({}) VALUES ({});
-            """
-        ).format(
-            sql.Identifier(table), sql.Identifier(columns[0]), sql.Literal(values[0])
-        )
-
-    elif len(columns) == len(values):
+    if len(columns) == len(values):
         query = sql.SQL(
             """
             INSERT INTO {} ({}) VALUES ({});
@@ -157,92 +161,3 @@ def get_value(cursor, table, column1, column2, match):
     cursor.execute(query)
 
     return cursor.fetchone()[0]
-
-
-def text_to_database(
-    table,
-    columns,
-    values,
-    file_handler,
-    connection,
-    cursor,
-    verbose=False,
-):
-    """
-    Parses the paragraphs from the txt file,
-      creates the table with the name of the book,
-      sends the paragraphs to the database into the table
-    Returns: tuple: number of chars, of lines, of paragraphs
-    table: str: table name
-    columns: str: list of columns' names
-    values: str: list of values to insert names
-    file_handler: object
-    connection: of of psycopg
-    cursor: object of psycopg
-    verbose: bool: print progress statements, default False
-    """
-
-    if verbose:
-        print(f'  Started table "{table}" populating...')
-
-    paragraph = ""
-    chars, count, pcount = 0, 0, 0
-
-    # form a query template
-    # if the column is one
-    if len(columns) == 1 and len(values) == 1:
-        query = sql.SQL(
-            """
-            INSERT INTO {} ({}) VALUES ({});
-            """
-        ).format(
-            sql.Identifier(table), sql.Identifier(columns[0]), sql.Literal(values[0])
-        )
-    # if more than one column
-    elif len(columns) == len(values):
-        query = sql.SQL(
-            """
-            INSERT INTO {} ({}) VALUES ({});
-            """
-        ).format(
-            sql.Identifier(table),
-            sql.SQL(", ").join(map(sql.Identifier, columns)),
-            sql.SQL(", ").join(map(sql.Literal, values)),
-        )
-    # if columns and values differ in number
-    else:
-        print("Error: Number of columns and values is different")
-        return 1
-
-    for line in file_handler:
-        count += 1
-        line = line.strip()
-        chars += len(line)
-
-        # insert paragraphs
-        # skip empty lines
-        if line == "" and paragraph == "":
-            continue
-
-        # when paragraph done
-        elif line == "":
-            values[0] = paragraph
-            cursor.execute(query)
-            pcount += 1
-
-            if pcount % 50 == 0:
-                connection.commit()
-            if pcount % 100 == 0:
-                if verbose:
-                    print(f"    {pcount} loaded...")
-                time.sleep(1)
-
-            paragraph = ""
-            continue
-
-        # populating paragraph
-        paragraph += " " + line
-
-    connection.commit()
-
-    return chars, count, pcount
