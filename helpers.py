@@ -39,16 +39,6 @@ def get_file_name(url):
     return None
 
 
-def get_file_index(url):
-    pattern = r"\/(\d+)\/"
-    match = re.search(pattern, url)
-
-    if match:
-        return match.group(1)
-
-    return None
-
-
 def get_txt(url, file_name, verbose=False):
     """
     Creates a txt file out of a url link

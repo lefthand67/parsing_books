@@ -7,18 +7,20 @@ import psycopg
 import requests
 from psycopg import sql
 
+import helpers
 import info
-from helpers import *
-
-# database relations list
-relations = ["title", "author", "book", "text"]
+import tables
 
 
 def main():
     verbose = True
+    clear_database = True
 
     # how many books we want to parse
     n = 1
+
+    # list of relations' schemata
+    relations = tables.relations
 
     # connect to database
     with psycopg.connect(
@@ -36,193 +38,127 @@ def main():
         # create a cursor
         with conn.cursor() as cur:
             if verbose:
-                print("  Cursor created")
+                print("Cursor created")
 
             # drop tables if needed
-            if verbose:
-                print()
-            for relation in relations:
-                drop_table(relation, cur)
-                if verbose:
-                    print(f"    Relation {relation} dropped")
-            if verbose:
-                print()
+            if clear_database:
+                for relation in relations:
+                    drop_table(relation[0], cur, verbose)
 
-            # create a title table query
-            query = sql.SQL(
-                """
-                CREATE TABLE IF NOT EXISTS {} (
-                  id SERIAL,
-                  name VARCHAR(128),
-                  language VARCHAR(64),
-                  year INTEGER,
-                  UNIQUE(name, year),
-                  PRIMARY KEY(id)
-                );
-                 """
-            ).format(sql.Identifier(relations[0]))
-            if verbose:
-                print("  ", query.as_string(conn))
-            cur.execute(query)
+            tables.create_language_table(relations, conn, cur, verbose)
 
-            # create an author table
-            query = sql.SQL(
-                """
-                CREATE TABLE IF NOT EXISTS {} (
-                  id SERIAL,
-                  name VARCHAR(128) UNIQUE,
-                  PRIMARY KEY(id)
-                )
-                """
-            ).format(sql.Identifier(relations[1]))
-            cur.execute(query)
-            if verbose:
-                print("  ", query.as_string(conn))
-
-            # create a book table (many-to-many)
-            query = sql.SQL(
-                """
-                CREATE TABLE IF NOT EXISTS {} (
-                  title_id INTEGER REFERENCES {}(id) ON DELETE CASCADE,
-                  author_id INTEGER REFERENCES {}(id) ON DELETE CASCADE
-                );
-                """
-            ).format(
-                sql.Identifier(relations[2]),
-                sql.Identifier(relations[0]),
-                sql.Identifier(relations[1]),
-            )
-            if verbose:
-                print("  ", query.as_string(conn))
-            cur.execute(query)
-
-            # create a text table
-            query = sql.SQL(
-                """
-                CREATE TABLE IF NOT EXISTS {} (
-                  id SERIAL,
-                  body TEXT,
-                  title_id INTEGER REFERENCES {}(id) ON DELETE CASCADE,
-                  PRIMARY KEY(id)
-                );
-                """
-            ).format(sql.Identifier(relations[3]), sql.Identifier(relations[0]))
-            if verbose:
-                print("  ", query.as_string(conn))
-            cur.execute(query)
-
+            tables.create_author_table(relations, conn, cur, verbose)
+            tables.create_book_table(relations, conn, cur, verbose)
+            tables.create_text_table(relations, conn, cur, verbose)
             # and finally let's start parsing
             for i in range(n):
-                rand = random.randint(1, 10000)
+                rand = random.randint(1, 100_000)
                 url = f"http://www.gutenberg.org/cache/epub/{rand}/pg{rand}.txt"
                 if verbose:
                     print("    Trying to download", url)
                 # check url
-                if url_check(url):
+                if helpers.url_check(url):
                     continue
 
                 parse_book(url, relations, conn, cur, verbose)
 
         if verbose:
-            print("\n  Cursor terminated")
+            print("Cursor terminated")
 
     if verbose:
         print("Connection closed")
 
 
-def drop_table(relation, cursor):
+def drop_table(relation, cursor, verbose=False):
     query = sql.SQL(
         """
         DROP TABLE IF EXISTS {} CASCADE;
         """
     ).format(sql.Identifier(relation))
+    if verbose:
+        print(f"Relation {relation} dropped")
+
     cursor.execute(query)
 
 
 def parse_book(url, relations, connection, cursor, verbose=False):
-    # url = input("Enter the book url: ")
-    # if url == "":
-    #    url = f"http://www.gutenberg.org/cache/epub/19337/pg19337.txt"
-
     # download book and save it to txt file
-    file_name = get_file_name(url)
-    print(f"    Downloading a file from {url}")
-    get_txt(url, file_name, verbose)
+    file_name = helpers.get_file_name(url)
+    print(f"Downloading a file from {url}")
+    helpers.get_txt(url, file_name, verbose)
 
     # try open the text
     try:
         file_handler = open(file_name, "r")
         if verbose:
-            print(f"    File {file_name} opened")
+            print(f"File {file_name} opened")
     except:
         Path.unlink(file_name)
-        print("    Could not open a file")
+        print("Could not open a file")
         return 1
 
     # check if the book has already been parsed
     # get the book's title
     pattern = re.compile(r"Title: (.*)$")
-    book_title = get_string_match(pattern, file_handler)
+    book_title = helpers.get_string_match(pattern, file_handler)
 
     query = sql.SQL(
         """
-        SELECT EXISTS (SELECT 1 FROM {} WHERE {} = %s);
+        SELECT EXISTS (SELECT 1 FROM {book} WHERE {title} = %s);
         """
-    ).format(sql.Identifier(relations[0]), sql.Identifier("name"))
+    ).format(
+        book=sql.Identifier(relations[2][0]), title=sql.Identifier(relations[2][1][1])
+    )
     cursor.execute(query, (book_title,))
 
     if cursor.fetchone()[0]:
         if verbose:
-            print("    The book is already in the database")
+            print("The book is already in the database")
         Path.unlink(file_name)
         return 2
 
     # get book's general info
     pattern = re.compile(r"Author: (.*)$")
-    book_author = get_string_match(pattern, file_handler)
+    book_author = helpers.get_string_match(pattern, file_handler)
 
     pattern = re.compile(r"Language: ([A-Za-z]+)")
-    book_language = get_string_match(pattern, file_handler)
+    book_language = helpers.get_string_match(pattern, file_handler)
 
-    book_year = get_book_year(file_handler)
+    book_year = helpers.get_book_year(file_handler)
 
     # print book's general info
     if verbose:
         print("***")
-    print(f'  {book_author} "{book_title}" {book_language} {book_year}')
+    print(f'  {book_author} "{book_title}" in {book_language}, {book_year}')
     if verbose:
         print("***")
 
-    # populate title relation
-    table = relations[0]
-    columns = ["name", "language", "year"]
-    values = [book_title, book_language, book_year]
-    insert_into_table(cursor, table, columns, values)
-    # get title_id for book table
-    title_id = get_value(cursor, table, "id", columns[0], book_title)
+    # populate language table
+    table, columns = tables.create_language_table(relations, connection, cursor)
+    values = [book_language]
+    helpers.insert_into_table(cursor, table, columns[1:], values)
+    # get language_id for book table
+    language_id = helpers.get_value(cursor, table, "id", columns[1], book_language)
 
-    # populate author relation
-    table = relations[1]
-    columns = ["name"]
+    # populate author table
+    table, columns = tables.create_author_table(relations, connection, cursor)
     values = [book_author]
-    insert_into_table(cursor, table, columns, values)
+    helpers.insert_into_table(cursor, table, columns[1:], values)
     # get tauthor_id for book table
-    author_id = get_value(cursor, table, "id", columns[0], book_author)
+    author_id = helpers.get_value(cursor, table, "id", columns[1], book_author)
 
-    # populate book relation (many-to-many helper)
-    table = "book"
-    columns = ["title_id", "author_id"]
-    values = [title_id, author_id]
-    insert_into_table(cursor, table, columns, values)
+    # populate book table
+    table, columns = tables.create_book_table(relations, connection, cursor)
+    values = [book_title, book_year, author_id, language_id]
+    helpers.insert_into_table(cursor, table, columns[1:], values)
+    book_id = helpers.get_value(cursor, table, "id", columns[1], book_title)
 
-    # populate text relation
-    # text table
-    table = "text"
-    columns = ["body", "title_id"]
+    # populate text table
+    table, columns = tables.create_text_table(relations, connection, cursor)
     # value "" represents paragraph
-    values = ["", title_id]
+    values = ["", book_id]
     chars, count, pcount = text_to_database(
-        table, columns, values, file_handler, connection, cursor, verbose
+        table, columns[1:], values, file_handler, connection, cursor, verbose
     )
 
     if verbose:
