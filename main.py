@@ -9,18 +9,29 @@ from psycopg import sql
 
 import helpers
 import info
-import tables
+import schemata
 
+# complete dictionary of relations' schemata
+relations = schemata.relations
 
 def main():
+
+    warning = input("You are about to launch the app with the vulnerable to SQL injection functionality. Provide only trusted dictionary of the relations' schemas. Continue? yes/no").lower()
+
+    elif warning == 'yes' or warning == 'y':
+        print("Поехали!")
+    if warning == 'no' or warning == 'n':
+        print("The user decided to quit the program. Chicken!")
+        return 1
+    else:
+        print("Seems like you pressed the wrong button buddy. Try again")
+        return main()
+
     verbose = True
     clear_database = True
 
     # how many books we want to parse
     n = 1
-
-    # list of relations' schemata
-    relations = tables.relations
 
     # connect to database
     with psycopg.connect(
@@ -42,20 +53,17 @@ def main():
 
             # drop tables if needed
             if clear_database:
-                for relation in relations:
-                    drop_table(relation[0], cur, verbose)
+                helpers.drop_tables(relations, conn, cur, verbose)
 
-            tables.create_language_table(relations, conn, cur, verbose)
+            # create tables
+            create_tables(relations, conn, cur, verbose)
 
-            tables.create_author_table(relations, conn, cur, verbose)
-            tables.create_book_table(relations, conn, cur, verbose)
-            tables.create_text_table(relations, conn, cur, verbose)
-            # and finally let's start parsing
+            # parse data into tables
             for i in range(n):
                 rand = random.randint(1, 100_000)
                 url = f"http://www.gutenberg.org/cache/epub/{rand}/pg{rand}.txt"
                 if verbose:
-                    print("    Trying to download", url)
+                    print("Trying to download", url)
                 # check url
                 if helpers.url_check(url):
                     continue
@@ -67,18 +75,6 @@ def main():
 
     if verbose:
         print("Connection closed")
-
-
-def drop_table(relation, cursor, verbose=False):
-    query = sql.SQL(
-        """
-        DROP TABLE IF EXISTS {} CASCADE;
-        """
-    ).format(sql.Identifier(relation))
-    if verbose:
-        print(f"Relation {relation} dropped")
-
-    cursor.execute(query)
 
 
 def parse_book(url, relations, connection, cursor, verbose=False):
@@ -97,34 +93,36 @@ def parse_book(url, relations, connection, cursor, verbose=False):
         print("Could not open a file")
         return 1
 
-    # check if the book has already been parsed
-    # get the book's title
+    # relations' names
+    language_rel, author_rel, book_rel, _ = relations.keys()
+    # dictionary of only attributes' names
+    attributes_dict = dict()
+    for relation, attributes in relations.items():
+        attributes_dict[relation] = [attr for attr, _ in attributes]
+
+    # get the book's general info
     pattern = re.compile(r"Title: (.*)$")
     book_title = helpers.get_string_match(pattern, file_handler)
 
-    query = sql.SQL(
-        """
-        SELECT EXISTS (SELECT 1 FROM {book} WHERE {title} = %s);
-        """
-    ).format(
-        book=sql.Identifier(relations[2][0]), title=sql.Identifier(relations[2][1][1])
-    )
-    cursor.execute(query, (book_title,))
+    # get the caret below the technical info
+    for line in file_handler:
+        if not line.startswith("***"):
+            continue
+        break
+    pattern = re.compile(r"\b(\d{4})\b")
+    book_year = helpers.get_string_match(pattern, file_handler)
 
-    if cursor.fetchone()[0]:
-        if verbose:
-            print("The book is already in the database")
+    # check if the book has already been parsed
+    if row_exists(book_rel, attributes_dict[book_rel][1:3],[book_title, book_year], connection, cursor):
+        print("The book is already in the database")
         Path.unlink(file_name)
         return 2
 
-    # get book's general info
     pattern = re.compile(r"Author: (.*)$")
     book_author = helpers.get_string_match(pattern, file_handler)
 
     pattern = re.compile(r"Language: ([A-Za-z]+)")
     book_language = helpers.get_string_match(pattern, file_handler)
-
-    book_year = helpers.get_book_year(file_handler)
 
     # print book's general info
     if verbose:
@@ -133,25 +131,37 @@ def parse_book(url, relations, connection, cursor, verbose=False):
     if verbose:
         print("***")
 
+    # get author_id and language_id for book table
+    for rel, value in zip([author_rel, language_rel], [book_author, book_language]):
+    attr_to_search_on = attributes_dict[rel][1]  # 'name'
+    author_id = helpers.get_foreign_key(
+        rel, attr_to_search_on, value, conn, cur
+    )
+
+    # dictionary of values we want to insert into relations
+    values_list = {}
+    # populate the relations
+    for relation, values in zip(relations, values_list):
+        helpers.insert_into_table(relation, attributes_dict[relation][1:], values[relation], cur)
+
+
+
     # populate language table
+    table, columns =
+
     table, columns = tables.create_language_table(relations, connection, cursor)
     values = [book_language]
     helpers.insert_into_table(cursor, table, columns[1:], values)
-    # get language_id for book table
-    language_id = helpers.get_value(cursor, table, "id", columns[1], book_language)
 
     # populate author table
     table, columns = tables.create_author_table(relations, connection, cursor)
     values = [book_author]
     helpers.insert_into_table(cursor, table, columns[1:], values)
-    # get tauthor_id for book table
-    author_id = helpers.get_value(cursor, table, "id", columns[1], book_author)
 
     # populate book table
     table, columns = tables.create_book_table(relations, connection, cursor)
     values = [book_title, book_year, author_id, language_id]
     helpers.insert_into_table(cursor, table, columns[1:], values)
-    book_id = helpers.get_value(cursor, table, "id", columns[1], book_title)
 
     # populate text table
     table, columns = tables.create_text_table(relations, connection, cursor)

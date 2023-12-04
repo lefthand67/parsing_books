@@ -100,28 +100,120 @@ def get_book_year(file_handler):
     return None
 
 
-def insert_into_table(cursor, table, columns, values):
+def drop_tables(relations, connection, cursor, verbose=False):
+    """
+    Drops all the tables mentioned in the relations dictionary
+      (see `create_table()` function's description).
+      The function can also take the list of tables' names if
+      you want to delete specified columns.
+    relations: dict or list or tuple: a list with the tables names;
+      if you use a dictionary, keys must be tables' names;
+    connection: psycopg class instance;
+    cursor: psycopg class instance;
+    """
+    for relation in relations:
+        query = sql.SQL(
+            """
+            DROP TABLE IF EXISTS {} CASCADE;
+            """
+        ).format(sql.Identifier(relation))
+
+        if verbose:
+            print(query.as_string(connection))
+        cursor.execute(query)
+
+    return 0
+
+
+def create_tables(relations, connection, cursor, verbose=False):
+    """
+    WARNING! The SQL injection possibility! Use this function
+      only within a trusted environment!
+    Creates a relation using a dictionary with the schemas of
+      relations; if you want to create just one relation, pass
+      one relation schema into the dictionary.
+      The dictionary has:
+      - a relation name as a key,
+      - a list of tuples (attrubute, datatype pairs) as a value.
+      Use only strings for the entries.
+      Example of a relations dictionary:
+      ```
+        relations = {
+            "table" : [("id", "SERIAL"),
+                       ("name", "TEXT"),
+                       ("age", "INTEGER"),
+                       ("email", "VARCHAR(128)"),
+                       ("department_id", "INTEGER REFERENCES department(id) ON DELETE CASCADE"),
+                       ("UNIQUE", "(name, age)"),
+                       ("PRIMARY KEY", "(id)")]
+        }
+      ```
+    """
+
+    for relation, attributes in relations.items():
+        query = f"CREATE TABLE IF NOT EXISTS {relation} ("
+        for attribute, datatype in attributes:
+            query += f"{attribute} {datatype},"
+
+        query = query.rstrip(",") + ")"
+
+        if verbose:
+            print(query.as_string(connection))
+        cursor.execute(query)
+
+    # return relation, attributes
+
+
+def row_exists(
+    relation, attributes_list, values_list, connection, cursor, vebose=False
+):
+    """
+    WARNING! The SQL injection possibility! Use this function
+      only within a trusted environment!
+    Checks whether the value is already in the relation.
+    Returns: bool: True if the value exists
+    """
+
+    if len(attributes_list) != len(values_list):
+        print("Error: Number of attributes and values is different")
+        return 1
+
+    query = f"SELECT EXISTS (SELECT 1 FROM {relation} WHERE "
+    conditions = list()
+    for attr, value in zip(attributes_list, values_list):
+        conditions.append(f"{attr} = {value}")
+    query = " AND ".join(conditions) + ");"
+    query = sql.SQL(query)
+
+    if verbose:
+        print(query.as_string(connection))
+    cursor.execute(query)
+
+    return cursor.fetchone()[0]
+
+
+def insert_into_table(relation, attributes, values, cursor):
     """
     Inserts data into attributes of the relation.
     cursor: PostgeSQL cursor object
     table: str: name of the relation;
-    columns: list or tuple of strings: list of the attributes' names
+    attributes: list or tuple of strings: list of the attributes' names
     values: list or tuple of strings: list of the corresponding
       to attributes values
     """
-    if len(columns) == len(values):
+    if len(attributes) == len(values):
         query = sql.SQL(
             """
             INSERT INTO {} ({}) VALUES ({});
             """
         ).format(
-            sql.Identifier(table),
-            sql.SQL(", ").join(map(sql.Identifier, columns)),
+            sql.Identifier(relation),
+            sql.SQL(", ").join(map(sql.Identifier, attributes)),
             sql.SQL(", ").join(map(sql.Literal, values)),
         )
 
     else:
-        print("Error: Number of columns and values is different")
+        print("Error: Number of attributes and values is different")
         return 1
 
     cursor.execute(query)
@@ -129,25 +221,54 @@ def insert_into_table(cursor, table, columns, values):
     return 0
 
 
-def get_value(cursor, table, column1, column2, match):
+def get_value(cursor, relation, attribute1, attribute2, match):
     """
     Returns one value from the select query to database
     cursor: PostgeSQL cursor object
-    table: str: name of the relation
-    column1: str: name of the select attribute
-    column2: str: name of the condition attribute
+    relation: str: name of the relation
+    attribute1: str: name of the select attribute
+    attribute2: str: name of the condition attribute
     match: str: condition value
     """
     query = sql.SQL(
         """
-        SELECT {} from {} WHERE {} = {} LIMIT 1;
+        SELECT {} FROM {} WHERE {} = {} LIMIT 1;
         """
     ).format(
-        sql.Identifier(column1),
-        sql.Identifier(table),
-        sql.Identifier(column2),
+        sql.Identifier(attribute1),
+        sql.Identifier(relation),
+        sql.Identifier(attribute2),
         sql.Literal(match),
     )
     cursor.execute(query)
+
+    return cursor.fetchone()[0]
+
+
+def get_foreign_key(
+    relation,
+    attribute_to_search_on,
+    value,
+    connection,
+    cursor,
+    pkey="id",
+    verbose=False,
+):
+    """
+    Gets the primary key of the relation's tuple.
+    """
+    query = sql.SQL(
+        """
+        SELECT {} FROM {} WHERE {} = %s;
+        """
+    ).format(
+        sql.Identifier(pkey),
+        sql.Identifier(relation),
+        sql.Identifier(attribute_to_search_on),
+    )
+
+    if verbose:
+        print(query.as_string(connection))
+    cursor.execute(query, (value,))
 
     return cursor.fetchone()[0]
