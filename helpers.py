@@ -100,7 +100,7 @@ def get_book_year(file_handler):
     return None
 
 
-def drop_tables(relations, connection, cursor, verbose=False):
+def drop_tables(connection, cursor, verbose=False):
     """
     Drops all the tables mentioned in the relations dictionary
       (see `create_table()` function's description).
@@ -111,6 +111,17 @@ def drop_tables(relations, connection, cursor, verbose=False):
     connection: psycopg class instance;
     cursor: psycopg class instance;
     """
+
+    query = sql.SQL(
+        """
+        SELECT table_name
+          FROM information_schema.tables
+          WHERE table_schema = 'public'
+          """
+    )
+    cursor.execute(query)
+    relations = [rel[0] for rel in cursor.fetchall()]
+
     for relation in relations:
         query = sql.SQL(
             """
@@ -118,9 +129,9 @@ def drop_tables(relations, connection, cursor, verbose=False):
             """
         ).format(sql.Identifier(relation))
 
-        if verbose:
-            print(query.as_string(connection))
         cursor.execute(query)
+    if verbose:
+        print(f"Relations {', '.join(relations)} have been dropped")
 
     return 0
 
@@ -158,14 +169,14 @@ def create_tables(relations, connection, cursor, verbose=False):
         query = query.rstrip(",") + ")"
 
         if verbose:
-            print(query.as_string(connection))
+            print(query)
         cursor.execute(query)
 
-    # return relation, attributes
+    return 0
 
 
 def row_exists(
-    relation, attributes_list, values_list, connection, cursor, vebose=False
+    relation, attributes_list, values_list, connection, cursor, verbose=False
 ):
     """
     WARNING! The SQL injection possibility! Use this function
@@ -181,8 +192,8 @@ def row_exists(
     query = f"SELECT EXISTS (SELECT 1 FROM {relation} WHERE "
     conditions = list()
     for attr, value in zip(attributes_list, values_list):
-        conditions.append(f"{attr} = {value}")
-    query = " AND ".join(conditions) + ");"
+        conditions.append(f"{attr} = '{value}'")
+    query += " AND ".join(conditions) + ");"
     query = sql.SQL(query)
 
     if verbose:
@@ -194,31 +205,42 @@ def row_exists(
 
 def insert_into_table(relation, attributes, values, cursor):
     """
-    Inserts data into attributes of the relation.
-    cursor: PostgeSQL cursor object
-    table: str: name of the relation;
-    attributes: list or tuple of strings: list of the attributes' names
-    values: list or tuple of strings: list of the corresponding
-      to attributes values
-    """
-    if len(attributes) == len(values):
-        query = sql.SQL(
-            """
-            INSERT INTO {} ({}) VALUES ({});
-            """
-        ).format(
-            sql.Identifier(relation),
-            sql.SQL(", ").join(map(sql.Identifier, attributes)),
-            sql.SQL(", ").join(map(sql.Literal, values)),
-        )
+    Inserts data into attributes of the relation and returns
+      the primary key, i.e. id.
 
-    else:
+    Parameters:
+    - cursor: PostgeSQL cursor object
+    - table: str: name of the relation;
+    - attributes: list or tuple of strings: list of the attributes' names
+    - values: list or tuple of strings: list of the corresponding
+      to attributes values
+
+    Returns:
+    - id of the the row, i.e. its primary key.
+    """
+
+    if len(attributes) != len(values):
         print("Error: Number of attributes and values is different")
         return 1
 
-    cursor.execute(query)
+    query = sql.SQL(
+        """
+        INSERT INTO {rel} ({cols}) VALUES ({vals})
+        ON CONFLICT DO NOTHING
+        RETURNING id;
+        """
+    ).format(
+        rel=sql.Identifier(relation),
+        cols=sql.SQL(", ").join(map(sql.Identifier, attributes)),
+        # vals=sql.SQL(", ").join(map(sql.Literal, values)),
+        vals=sql.SQL(", ").join(sql.Placeholder() * len(values)),
+    )
+    cursor.execute(query, values)
+    result = cursor.fetchone()
+    if result:
+        return result[0]
 
-    return 0
+    return None
 
 
 def get_value(cursor, relation, attribute1, attribute2, match):
@@ -251,7 +273,6 @@ def get_foreign_key(
     value,
     connection,
     cursor,
-    pkey="id",
     verbose=False,
 ):
     """
@@ -259,10 +280,9 @@ def get_foreign_key(
     """
     query = sql.SQL(
         """
-        SELECT {} FROM {} WHERE {} = %s;
+        SELECT id FROM {} WHERE {} = %s;
         """
     ).format(
-        sql.Identifier(pkey),
         sql.Identifier(relation),
         sql.Identifier(attribute_to_search_on),
     )
