@@ -1,4 +1,4 @@
-Rot Front! This is a Python program that aimed on parsing the txt format books from Gutenberg Project to a PostgreSQL database.
+Rot Front! This is a Python program that aimed at parsing the txt format books from Gutenberg Project to a PostgreSQL database.
 
 Program usage:
 
