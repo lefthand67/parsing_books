@@ -8,7 +8,6 @@ from pathlib import Path
 import psycopg
 import requests
 from psycopg import sql
-from tqdm import tqdm
 
 import helpers
 import info
