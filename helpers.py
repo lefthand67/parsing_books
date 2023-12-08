@@ -84,7 +84,7 @@ def get_string_match(pattern, file_handler, group_number=[1]):
             return match.group(*group_number)
 
     file_handler.seek(0)
-    return None
+    return ["Unknown" for i in range(len(group_number))]
 
 
 def drop_tables(connection, cursor, verbose=False):

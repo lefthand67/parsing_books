@@ -18,11 +18,10 @@ relations = schemata.relations
 
 
 def main():
-
     if warning_message():
         return 1
 
-# how many books we want to parse
+    # how many books we want to parse
     n = 1
     # report steps
     verbose = False
@@ -36,11 +35,12 @@ def main():
         except:
             print("Usage: `python main.py` or `python main.py number_of_links`")
             return 1
-        if '-V' in args:
+        if "-V" in args:
             verbose = True
-        if '-C' in args:
+        if "-C" in args:
             clear_database = True
 
+    print("Поехали!")
     # connect to database
     with psycopg.connect(
         f"""
@@ -70,7 +70,7 @@ def main():
             for i in range(n):
                 rand = random.randint(1, 73_081)
                 url = f"http://www.gutenberg.org/cache/epub/{rand}/pg{rand}.txt"
-
+                url = "http://www.gutenberg.org/cache/epub/8333/pg8333.txt"
                 print("Checking the url:", url)
                 # check url
                 if helpers.url_check(url):
@@ -78,6 +78,12 @@ def main():
 
                 if parse_book(url, relations, conn, cur, verbose):
                     continue
+
+                if n > 1:
+                    go_sleep = random.randint(1, 7)
+                    if verbose:
+                        print(f"Sleep for {go_sleep} sec")
+                    time.sleep(go_sleep)
 
         if verbose:
             print("Cursor terminated")
@@ -165,7 +171,9 @@ def parse_book(url, relations, connection, cursor, verbose=False):
 
     # get the book's author
     pattern = re.compile(r"(Author|Creator|Compiler|Contributor): (.*)$")
-    book_role, book_author = helpers.get_string_match(pattern, file_handler, group_number=[1, 2])
+    book_role, book_author = helpers.get_string_match(
+        pattern, file_handler, group_number=[1, 2]
+    )
     # escape ' symbol if it is in the string
     if book_author:
         book_author = book_author.replace("'", "''")
@@ -192,7 +200,9 @@ def parse_book(url, relations, connection, cursor, verbose=False):
     vals = values_dict[author_rel]
     # if the author is in the database already
     if helpers.row_exists(author_rel, attrs, vals, connection, cursor, verbose):
-        author_id = helpers.get_foreign_key(author_rel, attrs[0], book_author, connection, cursor, verbose)
+        author_id = helpers.get_foreign_key(
+            author_rel, attrs[0], book_author, connection, cursor, verbose
+        )
     else:
         author_id = helpers.insert_into_table(
             author_rel,
@@ -206,7 +216,9 @@ def parse_book(url, relations, connection, cursor, verbose=False):
     vals = values_dict[role_rel]
     # if the role is in the database already
     if helpers.row_exists(role_rel, attrs, vals, connection, cursor, verbose):
-        role_id = helpers.get_foreign_key(role_rel, attrs[0], book_role, connection, cursor, verbose)
+        role_id = helpers.get_foreign_key(
+            role_rel, attrs[0], book_role, connection, cursor, verbose
+        )
     else:
         role_id = helpers.insert_into_table(
             role_rel,
@@ -220,7 +232,9 @@ def parse_book(url, relations, connection, cursor, verbose=False):
     vals = values_dict[language_rel]
     # if the language is in the database already
     if helpers.row_exists(language_rel, attrs, vals, connection, cursor, verbose):
-        language_id = helpers.get_foreign_key(language_rel, attrs[0], book_language, connection, cursor, verbose)
+        language_id = helpers.get_foreign_key(
+            language_rel, attrs[0], book_language, connection, cursor, verbose
+        )
     else:
         language_id = helpers.insert_into_table(
             language_rel,
@@ -254,11 +268,7 @@ def parse_book(url, relations, connection, cursor, verbose=False):
         verbose,
     )
 
-    if verbose:
-        print(f'Tables {', '.join(relations.keys())} have been populated')
-    print(
-        "Loaded {} paragraphs, {} lines, {} characters".format(pcount, count, chars)
-    )
+    print("Loaded {} paragraphs, {} lines, {} characters".format(pcount, count, chars))
 
     # close file
     file_handler.close()
@@ -269,11 +279,6 @@ def parse_book(url, relations, connection, cursor, verbose=False):
     Path.unlink(file_name)
     if verbose:
         print(f"File {file_name} removed")
-
-    go_sleep = random.randint(1, 7)
-    time.sleep(go_sleep)
-    if verbose:
-        print(f"Sleep for {go_sleep} sec")
 
     return 0
 
@@ -352,7 +357,6 @@ def warning_message():
     ).lower()
 
     if warning == "yes" or warning == "y":
-        print("Поехали!")
         return 0
     elif warning == "no" or warning == "n":
         print("Chicken!")
