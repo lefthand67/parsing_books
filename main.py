@@ -1,5 +1,6 @@
 import random
 import re
+import sys
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -18,11 +19,11 @@ relations = schemata.relations
 
 
 def main():
-    verbose = True
-    clear_database = True
+    verbose = 0
+    clear_database = False
 
     # how many books we want to parse
-    n = 1
+    n = int(sys.argv[1])
 
     warning_message()
 
@@ -35,7 +36,7 @@ def main():
             user={info.user}
             password={info.pwd}
          """,
-        # autocommit=True,
+        autocommit=True,
     ) as conn:
         if verbose:
             print(f"Connection with database {info.dbname} established")
@@ -57,10 +58,9 @@ def main():
                 url = f"http://www.gutenberg.org/cache/epub/{rand}/pg{rand}.txt"
                 # url = 'http://www.gutenberg.org/cache/epub/7623/pg7623.txt'
                 #url = 'http://www.gutenberg.org/cache/epub/70056/pg70056.txt'
-                url = 'http://www.gutenberg.org/cache/epub/21997/pg21997.txt'
+                # url = 'http://www.gutenberg.org/cache/epub/21997/pg21997.txt'
 
-                if verbose:
-                    print("Trying to download", url)
+                print("Checking the url:", url)
                 # check url
                 if helpers.url_check(url):
                     continue
@@ -72,7 +72,7 @@ def main():
 
     if verbose:
         print("Connection closed")
-        print("Служу Советскому Союзу!")
+        print("Пролетарии всех стран, объединяйтесь!")
 
 
 def parse_book(url, relations, connection, cursor, verbose=False):
@@ -93,7 +93,7 @@ def parse_book(url, relations, connection, cursor, verbose=False):
 
     ## Let's organize rels' variables and their future values
     # variables of the relations' names
-    language_rel, author_rel, book_rel, text_rel = relations.keys()
+    author_rel, role_rel, language_rel, book_rel, text_rel = relations.keys()
     # dictionary of only attributes' names
     attributes_dict = dict()
     for relation, attributes in relations.items():
@@ -106,6 +106,9 @@ def parse_book(url, relations, connection, cursor, verbose=False):
     # get the book's title
     pattern = re.compile(r"Title: (.*)$")
     book_title = helpers.get_string_match(pattern, file_handler)
+    # escape ' symbol if it is in the string
+    if book_title:
+        book_title = book_title.replace("'", "''")
     # insert value into the values_dict
     values_dict[book_rel].append(book_title)
 
@@ -142,17 +145,22 @@ def parse_book(url, relations, connection, cursor, verbose=False):
         Path.unlink(file_name)
         return 2
 
+    # get the book's author
+    # this needs additional table 'role'
+    pattern = re.compile(r"(Author|Creator|Compiler): (.*)$")
+    book_role, book_author = helpers.get_string_match(pattern, file_handler, group_number=[1, 2])
+    # escape ' symbol if it is in the string
+    if book_author:
+        book_author = book_author.replace("'", "''")
+    # insert value into the values_dict
+    values_dict[author_rel].append(book_author)
+    values_dict[role_rel].append(book_role)
+
     # get the book's language
     pattern = re.compile(r"Language: ([A-Za-z]+)")
     book_language = helpers.get_string_match(pattern, file_handler)
     # insert value into the values_dict
     values_dict[language_rel].append(book_language)
-
-    # get the book's author
-    pattern = re.compile(r"(Author|Creator): (.*)$")
-    book_author = helpers.get_string_match(pattern, file_handler)
-    # insert value into the values_dict
-    values_dict[author_rel].append(book_author)
 
     # print book's general info
     if verbose:
@@ -162,20 +170,6 @@ def parse_book(url, relations, connection, cursor, verbose=False):
         print("***")
 
     ## populate the relations
-    # populate the language relation
-    attrs = attributes_dict[language_rel][1:-1]
-    vals = values_dict[language_rel]
-    # if the language is in the database already
-    if helpers.row_exists(language_rel, attrs, vals, connection, cursor, verbose):
-        print('Found language')
-        language_id = helpers.get_foreign_key(language_rel, attrs[0], book_language, connection, cursor, verbose)
-    else:
-        language_id = helpers.insert_into_table(
-            language_rel,
-            attributes_dict[language_rel][1:-1],
-            values_dict[language_rel],
-            cursor,
-        )
     # populate the author relation
     attrs = attributes_dict[author_rel][1:-1]
     vals = values_dict[author_rel]
@@ -190,9 +184,37 @@ def parse_book(url, relations, connection, cursor, verbose=False):
             cursor,
         )
 
-    # add values to values_dict
-    values_dict[book_rel].append(language_id)
+    # populate the role relation
+    attrs = attributes_dict[role_rel][1:-1]
+    vals = values_dict[role_rel]
+    # if the role is in the database already
+    if helpers.row_exists(role_rel, attrs, vals, connection, cursor, verbose):
+        role_id = helpers.get_foreign_key(role_rel, attrs[0], book_role, connection, cursor, verbose)
+    else:
+        role_id = helpers.insert_into_table(
+            role_rel,
+            attributes_dict[role_rel][1:-1],
+            values_dict[role_rel],
+            cursor,
+        )
+
+    # populate the language relation
+    attrs = attributes_dict[language_rel][1:-1]
+    vals = values_dict[language_rel]
+    # if the language is in the database already
+    if helpers.row_exists(language_rel, attrs, vals, connection, cursor, verbose):
+        language_id = helpers.get_foreign_key(language_rel, attrs[0], book_language, connection, cursor, verbose)
+    else:
+        language_id = helpers.insert_into_table(
+            language_rel,
+            attributes_dict[language_rel][1:-1],
+            values_dict[language_rel],
+            cursor,
+        )
+    # add values to values_dict - check schema for order!
     values_dict[book_rel].append(author_id)
+    values_dict[book_rel].append(role_id)
+    values_dict[book_rel].append(language_id)
 
     # populate the book table
     book_id = helpers.insert_into_table(

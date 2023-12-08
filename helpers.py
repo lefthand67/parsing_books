@@ -56,13 +56,18 @@ def get_txt(url, file_name, verbose=False):
     return file_name
 
 
-def get_string_match(pattern, file_handler):
+def get_string_match(pattern, file_handler, group_number=[1]):
     """
     Gets a string match like author's name, book title, etc.
       from the opened file
-    pattern: a compiled regex obj: use re.compile() method
-    file_handler: a file object for reading: use
+
+    Parameters:
+    - pattern: a compiled regex obj: use re.compile() method
+    - file_handler: a file object for reading: use
       open(file_name, "r") method
+    - group_number: list of ints: the number of the group you want to get
+        from match.group(), by default 1
+
     Returns: str
     """
 
@@ -70,7 +75,7 @@ def get_string_match(pattern, file_handler):
         match = re.search(pattern, line)
         if match:
             file_handler.seek(0)
-            return match.group(1)
+            return match.group(*group_number)
 
     file_handler.seek(0)
     return None
@@ -192,7 +197,10 @@ def row_exists(
     query = f"SELECT EXISTS (SELECT 1 FROM {relation} WHERE "
     conditions = list()
     for attr, value in zip(attributes_list, values_list):
-        conditions.append(f"{attr} = '{value}'")
+        # $$string$$ helps to effectively handle additional ' symbol
+        # if there is ' in the title, for example, and you escapeit
+        # with additional ' then WHERE clause will give False match
+        conditions.append(f"{attr} = $${value}$$")
     query += " AND ".join(conditions) + ");"
     query = sql.SQL(query)
 
@@ -278,17 +286,15 @@ def get_foreign_key(
     """
     Gets the primary key of the relation's tuple.
     """
-    query = sql.SQL(
-        """
-        SELECT id FROM {} WHERE {} = %s;
-        """
-    ).format(
+    query = sql.SQL("SELECT id FROM {} WHERE {} = {};").format(
         sql.Identifier(relation),
         sql.Identifier(attribute_to_search_on),
+        sql.Literal(value),
     )
 
     if verbose:
         print(query.as_string(connection))
-    cursor.execute(query, (value,))
+        print(f"Found {relation}")
+    cursor.execute(query)
 
     return cursor.fetchone()[0]
