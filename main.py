@@ -19,11 +19,27 @@ relations = schemata.relations
 
 
 def main():
-    verbose = 0
-    clear_database = False
 
     # how many books we want to parse
-    n = int(sys.argv[1])
+    n = 1
+    # report steps
+    verbose = False
+    # start the database over
+    clear_database = False
+
+    args = sys.argv
+    if len(args) > 1:
+        try:
+            n = int(sys.argv[1])
+        except:
+            print("Usage: `python3 main.py` or `python3 main.py number_of_links`")
+            return 1
+        if '-V' in args:
+            verbose = True
+        if '-C' in args:
+            clear_database = True
+
+
 
     warning_message()
 
@@ -56,9 +72,6 @@ def main():
             for i in range(n):
                 rand = random.randint(1, 100_000)
                 url = f"http://www.gutenberg.org/cache/epub/{rand}/pg{rand}.txt"
-                # url = 'http://www.gutenberg.org/cache/epub/7623/pg7623.txt'
-                #url = 'http://www.gutenberg.org/cache/epub/70056/pg70056.txt'
-                # url = 'http://www.gutenberg.org/cache/epub/21997/pg21997.txt'
 
                 print("Checking the url:", url)
                 # check url
@@ -89,7 +102,7 @@ def parse_book(url, relations, connection, cursor, verbose=False):
     except:
         Path.unlink(file_name)
         print("Could not open a file")
-        return 1
+        return 2
 
     ## Let's organize rels' variables and their future values
     # variables of the relations' names
@@ -143,7 +156,7 @@ def parse_book(url, relations, connection, cursor, verbose=False):
     ):
         print("The book is already in the database")
         Path.unlink(file_name)
-        return 2
+        return 1
 
     # get the book's author
     # this needs additional table 'role'
