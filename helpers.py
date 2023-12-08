@@ -9,18 +9,21 @@ from psycopg import sql
 def url_check(url):
     """
     Checks whether url is responding
-    Returns: bool: False if url is okay
+    Returns: int: 0 if url is okay
     """
 
-    response = requests.get(url, allow_redirects=True)
+    try:
+        r = requests.get(url, allow_redirects=True)
+        result = r.status_code
+        if result == 200:
+            return 0
 
-    result = response.status_code
-
-    if result == 200:
-        return False
+    except Exception as e:
+        print("Error:", e)
+        return 1
 
     print(f"Error {result}")
-    return True
+    return 0
 
 
 def get_file_name(url):
@@ -42,18 +45,21 @@ def get_file_name(url):
 def get_txt(url, file_name, verbose=False):
     """
     Creates a txt file out of a url link
-    Returns: str: a name of the created file
+    Returns: int: 0 if the file is saved
     """
 
-    response = requests.get(url, allow_redirects=True)
-    content = response.text
+    try:
+        r = requests.get(url, allow_redirects=True)
+        content = r.text
+        with open(file_name, "w") as file:
+            file.write(content)
+            if verbose:
+                print(f"Text saved as {file_name}")
+        return 0
 
-    with open(file_name, "w") as file:
-        file.write(content)
-        if verbose:
-            print(f"Text saved as {file_name}")
-
-    return file_name
+    except Exception as e:
+        print("Error:", e)
+        return 1
 
 
 def get_string_match(pattern, file_handler, group_number=[1]):
@@ -76,30 +82,6 @@ def get_string_match(pattern, file_handler, group_number=[1]):
         if match:
             file_handler.seek(0)
             return match.group(*group_number)
-
-    file_handler.seek(0)
-    return None
-
-
-def get_book_year(file_handler):
-    """
-    Returns: str: a year the book was first published.
-    file_handler: a file object for reading: use
-      open(file_name, "r") method
-    """
-
-    # get the caret below the technical info
-    for line in file_handler:
-        if not line.startswith("***"):
-            continue
-        break
-
-    pattern = re.compile(r"\b(\d{4})\b")
-    for line in file_handler:
-        match = pattern.search(line)
-        if match:
-            file_handler.seek(0)
-            return match.group(1)
 
     file_handler.seek(0)
     return None
@@ -161,7 +143,7 @@ def create_tables(relations, connection, cursor, verbose=False):
                        ("email", "VARCHAR(128)"),
                        ("department_id", "INTEGER REFERENCES department(id) ON DELETE CASCADE"),
                        ("UNIQUE", "(name, age)"),
-                       ("PRIMARY KEY", "(id)")]
+                       ("PRIMARY KEY", "(id)")],
         }
       ```
     """
@@ -169,9 +151,9 @@ def create_tables(relations, connection, cursor, verbose=False):
     for relation, attributes in relations.items():
         query = f"CREATE TABLE IF NOT EXISTS {relation} ("
         for attribute, datatype in attributes:
-            query += f"{attribute} {datatype},"
+            query += f"{attribute} {datatype}, "
 
-        query = query.rstrip(",") + ")"
+        query = query.rstrip(", ") + ")"
 
         if verbose:
             print(query)

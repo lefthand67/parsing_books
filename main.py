@@ -19,7 +19,10 @@ relations = schemata.relations
 
 def main():
 
-    # how many books we want to parse
+    if warning_message():
+        return 1
+
+# how many books we want to parse
     n = 1
     # report steps
     verbose = False
@@ -31,16 +34,12 @@ def main():
         try:
             n = int(sys.argv[1])
         except:
-            print("Usage: `python3 main.py` or `python3 main.py number_of_links`")
+            print("Usage: `python main.py` or `python main.py number_of_links`")
             return 1
         if '-V' in args:
             verbose = True
         if '-C' in args:
             clear_database = True
-
-
-
-    warning_message()
 
     # connect to database
     with psycopg.connect(
@@ -69,7 +68,7 @@ def main():
 
             # parse data into tables
             for i in range(n):
-                rand = random.randint(1, 100_000)
+                rand = random.randint(1, 73_081)
                 url = f"http://www.gutenberg.org/cache/epub/{rand}/pg{rand}.txt"
 
                 print("Checking the url:", url)
@@ -77,7 +76,8 @@ def main():
                 if helpers.url_check(url):
                     continue
 
-                parse_book(url, relations, conn, cur, verbose)
+                if parse_book(url, relations, conn, cur, verbose):
+                    continue
 
         if verbose:
             print("Cursor terminated")
@@ -91,7 +91,8 @@ def parse_book(url, relations, connection, cursor, verbose=False):
     # download book and save it to txt file
     file_name = helpers.get_file_name(url)
     print(f"Downloading a file from {url}")
-    helpers.get_txt(url, file_name, verbose)
+    if helpers.get_txt(url, file_name, verbose):
+        return 1
 
     # try open the text
     try:
@@ -101,7 +102,7 @@ def parse_book(url, relations, connection, cursor, verbose=False):
     except:
         Path.unlink(file_name)
         print("Could not open a file")
-        return 2
+        return 1
 
     ## Let's organize rels' variables and their future values
     # variables of the relations' names
@@ -125,13 +126,17 @@ def parse_book(url, relations, connection, cursor, verbose=False):
     values_dict[book_rel].append(book_title)
 
     # get the book's year
+    book_year = 10000
     pattern = re.compile(r"\b(\d{4})\b")
     # get the caret below the technical info
     for line in file_handler:
         if not line.startswith("***"):
             continue
         break
+    count = 0
     for line in file_handler:
+        if count > 500:
+            break
         if "***" in line:
             book_year = 10_000
             break
@@ -140,6 +145,7 @@ def parse_book(url, relations, connection, cursor, verbose=False):
             file_handler.seek(0)
             book_year = match.group(1)
             break
+        count += 1
     file_handler.seek(0)
     # insert value into the values_dict
     values_dict[book_rel].append(book_year)
@@ -158,8 +164,7 @@ def parse_book(url, relations, connection, cursor, verbose=False):
         return 1
 
     # get the book's author
-    # this needs additional table 'role'
-    pattern = re.compile(r"(Author|Creator|Compiler): (.*)$")
+    pattern = re.compile(r"(Author|Creator|Compiler|Contributor): (.*)$")
     book_role, book_author = helpers.get_string_match(pattern, file_handler, group_number=[1, 2])
     # escape ' symbol if it is in the string
     if book_author:
@@ -265,7 +270,10 @@ def parse_book(url, relations, connection, cursor, verbose=False):
     if verbose:
         print(f"File {file_name} removed")
 
-    time.sleep(random.randint(1, 7))
+    go_sleep = random.randint(1, 7)
+    time.sleep(go_sleep)
+    if verbose:
+        print(f"Sleep for {go_sleep} sec")
 
     return 0
 
@@ -345,12 +353,14 @@ def warning_message():
 
     if warning == "yes" or warning == "y":
         print("Поехали!")
+        return 0
     elif warning == "no" or warning == "n":
-        print("The user decided to quit the program. Chicken!")
+        print("Chicken!")
         return 1
     else:
         print("Seems like you pressed the wrong button buddy. Try again")
         return main()
 
 
-main()
+if __name__ == "__main__":
+    main()
