@@ -18,29 +18,50 @@ relations = schemata.relations
 
 
 def main():
-    if warning_message():
-        return 1
-
     # how many books we want to parse
     n = 1
-    # report steps
+    # describe steps
     verbose = False
     # start the database over
     clear_database = False
+    no_warning = False
 
     args = sys.argv
     if len(args) > 1:
         try:
-            n = int(sys.argv[1])
+            n = int(args[1])
+            if n < 1:
+                print(f"Number of links must be more than 0")
+                return 1
         except:
-            print("Usage: `python main.py` or `python main.py number_of_links`")
+            print(
+                "Usage: `python main.py` or `python main.py number_of_links [options]`"
+            )
             return 1
-        if "-V" in args:
-            verbose = True
-        if "-C" in args:
-            clear_database = True
+        args = sys.argv[2:]
+        if len(args) < 4:
+            if "-V" in args:
+                verbose = True
+                args.remove("-V")
+            if "-C" in args:
+                clear_database = True
+                args.remove("-C")
+            if "-NW" in args:
+                no_warning = True
+                args.remove("-NW")
+            if args:
+                print_usage()
+                return 1
+        else:
+            print_usage()
+            return 1
+
+    if not no_warning:
+        if warning_message():
+            return 1
 
     print("Поехали!")
+
     # connect to database
     with psycopg.connect(
         f"""
@@ -70,7 +91,6 @@ def main():
             for i in range(n):
                 rand = random.randint(1, 73_081)
                 url = f"http://www.gutenberg.org/cache/epub/{rand}/pg{rand}.txt"
-                url = "http://www.gutenberg.org/cache/epub/8333/pg8333.txt"
                 print("Checking the url:", url)
                 # check url
                 if helpers.url_check(url):
@@ -208,6 +228,7 @@ def parse_book(url, relations, connection, cursor, verbose=False):
             author_rel,
             attributes_dict[author_rel][1:-1],
             values_dict[author_rel],
+            connection,
             cursor,
         )
 
@@ -224,6 +245,7 @@ def parse_book(url, relations, connection, cursor, verbose=False):
             role_rel,
             attributes_dict[role_rel][1:-1],
             values_dict[role_rel],
+            connection,
             cursor,
         )
 
@@ -240,6 +262,7 @@ def parse_book(url, relations, connection, cursor, verbose=False):
             language_rel,
             attributes_dict[language_rel][1:-1],
             values_dict[language_rel],
+            connection,
             cursor,
         )
     # add values to values_dict - check schema for order!
@@ -252,6 +275,7 @@ def parse_book(url, relations, connection, cursor, verbose=False):
         book_rel,
         attributes_dict[book_rel][1:-2],
         values_dict[book_rel],
+        connection,
         cursor,
     )
 
@@ -330,7 +354,7 @@ def text_to_database(
         # when paragraph done
         elif line == "":
             values[0] = paragraph
-            helpers.insert_into_table(relation, attributes, values, cursor)
+            helpers.insert_into_table(relation, attributes, values, connection, cursor)
             pcount += 1
 
             if pcount % 50 == 0:
@@ -364,6 +388,14 @@ def warning_message():
     else:
         print("Seems like you pressed the wrong button buddy. Try again")
         return main()
+
+
+def print_usage():
+    print("Usage: `python main.py` or `python main.py number_of_links [options]`")
+    print("Available options:")
+    print("\t-C (clear databse)")
+    print("\t-V (verbose on)")
+    print("\t-NW (skip warning message)")
 
 
 if __name__ == "__main__":

@@ -193,7 +193,7 @@ def row_exists(
     return cursor.fetchone()[0]
 
 
-def insert_into_table(relation, attributes, values, cursor):
+def insert_into_table(relation, attributes, values, connection, cursor):
     """
     Inserts data into attributes of the relation and returns
       the primary key, i.e. id.
@@ -214,11 +214,7 @@ def insert_into_table(relation, attributes, values, cursor):
         return 1
 
     query = sql.SQL(
-        """
-        INSERT INTO {rel} ({cols}) VALUES ({vals})
-        ON CONFLICT DO NOTHING
-        RETURNING id;
-        """
+        "INSERT INTO {rel} ({cols}) VALUES ({vals}) ON CONFLICT DO NOTHING RETURNING id;"
     ).format(
         rel=sql.Identifier(relation),
         cols=sql.SQL(", ").join(map(sql.Identifier, attributes)),
@@ -226,11 +222,14 @@ def insert_into_table(relation, attributes, values, cursor):
         vals=sql.SQL(", ").join(sql.Placeholder() * len(values)),
     )
     cursor.execute(query, values)
+    # cursor.execute(query)
     result = cursor.fetchone()
     if result:
         return result[0]
 
-    return None
+    print("Error handled: On conflict do nothing")
+    print(query.as_string(connection))
+    return 0
 
 
 def get_value(cursor, relation, attribute1, attribute2, match):
