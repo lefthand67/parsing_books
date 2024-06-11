@@ -1,4 +1,4 @@
-Rot Front! This is a Python program that aimed at parsing the txt format books from Gutenberg Project to a PostgreSQL database. The program is not perfect and must be considered as a test, or training in writing PostgreSQL, script.
+Rot Front! This is a Python program that aimed at parsing the txt format books from Gutenberg Project to a PostgreSQL database. The program is a way far from being perfect and must be considered as a showcase of working with the psycopg 3 library. No OOP here, only functions, so it is not really readable. Consider using these functions as a basis for the OOP module.
 
 Program usage:
 

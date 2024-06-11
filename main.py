@@ -84,11 +84,16 @@ def main():
             # drop tables if True
             if clear_database:
                 helpers.drop_tables(conn, cur, verbose)
-                # and create tables
-                helpers.create_tables(relations, conn, cur, verbose)
+            # create tables
+            helpers.create_tables(relations, conn, cur, verbose)
 
             # parse data into tables
             for i in range(n):
+                if n > 1 and i > 0:
+                    go_sleep = random.randint(1, 7)
+                    if verbose:
+                        print(f"Sleep for {go_sleep} sec")
+                    time.sleep(go_sleep)
                 rand = random.randint(1, 73_081)
                 url = f"http://www.gutenberg.org/cache/epub/{rand}/pg{rand}.txt"
                 print("Checking the url:", url)
@@ -99,18 +104,12 @@ def main():
                 if parse_book(url, relations, conn, cur, verbose):
                     continue
 
-                if n > 1:
-                    go_sleep = random.randint(1, 7)
-                    if verbose:
-                        print(f"Sleep for {go_sleep} sec")
-                    time.sleep(go_sleep)
-
         if verbose:
             print("Cursor terminated")
 
     if verbose:
         print("Connection closed")
-        print("Пролетарии всех стран, объединяйтесь!")
+        print("Пролетарии всех стран, соединяйтесь!")
 
 
 def parse_book(url, relations, connection, cursor, verbose=False):
